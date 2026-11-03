@@ -3,13 +3,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Mode } from "@/data/types";
 import { CatalogListingShell } from "@/components/catalog/CatalogListingShell";
+import { SubcategoryCard } from "@/components/catalog/SubcategoryCard";
 import { SeoJsonLd } from "@/components/shared/SeoJsonLd";
 import { getCatalogue } from "@/lib/dataUtils";
 import {
   getCategoryBySlug,
   getCategorySubcategoryBySlug,
+  getProductUrl,
   getStaticSubcategoryParams,
   getSubcategoryProducts,
+  getSubcategoryVehicleTypes,
+  getVehicleTypeProducts,
 } from "@/lib/dataUtils";
 import { buildBreadcrumbListJsonLd } from "@/lib/seoHelpers";
 import { isMode } from "@/lib/modeUtils";
@@ -57,6 +61,11 @@ async function resolveSubcategoryPage(
     category,
     products: getSubcategoryProducts(validMode, category.slug, subcategory.slug),
     subcategory,
+    vehicleTypes: getSubcategoryVehicleTypes(
+      validMode,
+      category.slug,
+      subcategory.slug,
+    ),
   };
 }
 
@@ -81,7 +90,7 @@ export async function generateMetadata({
 export default async function SubcategoryProductsPage({
   params,
 }: SubcategoryPageProps) {
-  const { mode, category, products, subcategory } =
+  const { mode, category, products, subcategory, vehicleTypes } =
     await resolveSubcategoryPage(params);
   const catalogue = getCatalogue();
   const filterPanel = catalogue.modes[mode].filterPanel;
@@ -121,17 +130,49 @@ export default async function SubcategoryProductsPage({
             </div>
           </div>
 
-          <CatalogListingShell
-            brandLabel={brandField.label}
-            brandPlaceholder={brandField.placeholder}
-            categoryTitle={`${subcategory.title} ${category.title}`}
-            compatibilityLabel={compatibilityField.label}
-            compatibilityPlaceholder={compatibilityField.placeholder}
-            filterPanelCopy={filterPanel.copy}
-            filterPanelTitle={filterPanel.title}
-            mode={mode}
-            products={products}
-          />
+          {vehicleTypes.length > 0 ? (
+            <>
+              <h2 className="section-title">Browse by vehicle type</h2>
+              <div
+                aria-label={`${subcategory.title} vehicle types`}
+                className="category-overview-grid"
+              >
+                {vehicleTypes.map((vehicleType) => (
+                  <SubcategoryCard
+                    categorySlug={category.slug}
+                    href={
+                      vehicleType.productCount === 1
+                        ? getProductUrl(
+                            getVehicleTypeProducts(
+                              mode,
+                              category.slug,
+                              subcategory.slug,
+                              vehicleType.slug,
+                            )[0],
+                            mode,
+                          )
+                        : `/${mode}/${category.slug}/sub/${subcategory.slug}/vehicle/${vehicleType.slug}/`
+                    }
+                    key={vehicleType.id}
+                    mode={mode}
+                    subcategory={vehicleType}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <CatalogListingShell
+              brandLabel={brandField.label}
+              brandPlaceholder={brandField.placeholder}
+              categoryTitle={`${subcategory.title} ${category.title}`}
+              compatibilityLabel={compatibilityField.label}
+              compatibilityPlaceholder={compatibilityField.placeholder}
+              filterPanelCopy={filterPanel.copy}
+              filterPanelTitle={filterPanel.title}
+              mode={mode}
+              products={products}
+            />
+          )}
         </div>
       </div>
     </section>

@@ -8,12 +8,14 @@ import { getAssetPath, getFallbackInitials } from "@/components/catalog/cardUtil
 
 interface SubcategoryCardProps {
   categorySlug: string;
+  href?: string;
   mode: Mode;
   subcategory: ProductSubcategory;
 }
 
 export function SubcategoryCard({
   categorySlug,
+  href,
   mode,
   subcategory,
 }: SubcategoryCardProps) {
@@ -22,7 +24,7 @@ export function SubcategoryCard({
   return (
     <Link
       className="category-card category-card-clean subcategory-card"
-      href={`/${mode}/${categorySlug}/sub/${subcategory.slug}/`}
+      href={href || `/${mode}/${categorySlug}/sub/${subcategory.slug}/`}
     >
       <div className="cat-visual">
         {imagePath ? (
@@ -39,6 +41,7 @@ export function SubcategoryCard({
         </span>
       </div>
       <h3>{subcategory.title}</h3>
+      <span className="subcategory-card-count">{subcategory.count}</span>
     </Link>
   );
 }

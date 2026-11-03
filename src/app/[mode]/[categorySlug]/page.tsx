@@ -7,6 +7,8 @@ import { SeoJsonLd } from "@/components/shared/SeoJsonLd";
 import {
   getCategoryBySlug,
   getCategorySubcategories,
+  getProductUrl,
+  getSubcategoryProducts,
   getStaticCategoryParams,
 } from "@/lib/dataUtils";
 import {
@@ -98,6 +100,18 @@ export default async function CategorySubcategoriesPage({
             {subcategories.map((subcategory) => (
               <SubcategoryCard
                 categorySlug={category.slug}
+                href={
+                  subcategory.productCount === 1
+                    ? getProductUrl(
+                        getSubcategoryProducts(
+                          mode,
+                          category.slug,
+                          subcategory.slug,
+                        )[0],
+                        mode,
+                      )
+                    : undefined
+                }
                 key={subcategory.id}
                 mode={mode}
                 subcategory={subcategory}

@@ -51,8 +51,48 @@ export interface ProductSubcategory {
   slug: string;
   description: string;
   count: string;
+  productCount: number;
   imageUrl?: string;
 }
+
+export interface ProductAttributeGroup {
+  field: string;
+  slug: string;
+  values: ProductSubcategory[];
+}
+
+export interface ProductFacetSelection {
+  facetSlug: string;
+  valueSlug: string;
+}
+
+const PRODUCT_SPEC_EXCLUSIONS = new Set([
+  "sku",
+  "sub category",
+  "vehicle type",
+  "original category",
+  "standard packaging",
+  "standard packing",
+  "oem numbers",
+  "hsn code",
+  "hsn description",
+  "mrp",
+]);
+
+const PRODUCT_FACET_PRIORITY = [
+  "Vehicle Manufacturer",
+  "Compatible Vehicle Model",
+  "Compatible Application",
+  "Position",
+  "Side",
+  "Fuel Type",
+  "Voltage",
+  "Wattage",
+  "Base Socket",
+  "Diameter Mm",
+  "Available Size",
+  "Brand",
+];
 
 function withStableProductImages(source: Catalogue): Catalogue {
   return {
@@ -144,7 +184,8 @@ export function getCategorySubcategories(
   const grouped = new Map<string, Product[]>();
 
   products.forEach((product) => {
-    const key = product.brand || "General";
+    const key =
+      product.technicalSpecs?.["Sub Category"] || product.brand || "General";
     grouped.set(key, [...(grouped.get(key) || []), product]);
   });
 
@@ -160,6 +201,7 @@ export function getCategorySubcategories(
         slug: slugify(brand),
         description: `${count} ${count === 1 ? "product" : "products"} available in ${firstProduct.category}.`,
         count: `${count} ${count === 1 ? "item" : "items"}`,
+        productCount: count,
         imageUrl: firstProduct.image || firstProduct.imageUrl,
       };
     });
@@ -193,7 +235,287 @@ export function getSubcategoryProducts(
   }
 
   return getCategoryProducts(mode, categorySlug).filter(
-    (product) => slugify(product.brand || "General") === subcategory.slug,
+    (product) =>
+      slugify(
+        product.technicalSpecs?.["Sub Category"] || product.brand || "General",
+      ) === subcategory.slug,
+  );
+}
+
+export function getSubcategoryVehicleTypes(
+  mode: Mode,
+  categorySlug: string,
+  subcategorySlug: string,
+): ProductSubcategory[] {
+  const products = getSubcategoryProducts(mode, categorySlug, subcategorySlug);
+  const grouped = new Map<string, Product[]>();
+
+  products.forEach((product) => {
+    const vehicleType = product.technicalSpecs?.["Vehicle Type"] || "Other Applications";
+    grouped.set(vehicleType, [...(grouped.get(vehicleType) || []), product]);
+  });
+
+  // A singleton product is already the leaf; don't insert a one-product page.
+  if (products.length < 2) {
+    return [];
+  }
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([vehicleType, vehicleProducts]) => {
+      const firstProduct = vehicleProducts[0];
+      const count = vehicleProducts.length;
+
+      return {
+        id: `${subcategorySlug}-${slugify(vehicleType)}`,
+        title: vehicleType,
+        slug: slugify(vehicleType),
+        description: `${count} ${count === 1 ? "product" : "products"} available for ${vehicleType.toLowerCase()}.`,
+        count: `${count} ${count === 1 ? "item" : "items"}`,
+        productCount: count,
+        imageUrl: firstProduct.image || firstProduct.imageUrl,
+      };
+    });
+}
+
+export function getVehicleTypeProducts(
+  mode: Mode,
+  categorySlug: string,
+  subcategorySlug: string,
+  vehicleTypeSlug: string,
+): Product[] {
+  return getSubcategoryProducts(mode, categorySlug, subcategorySlug).filter(
+    (product) =>
+      slugify(product.technicalSpecs?.["Vehicle Type"] || "Other Applications") ===
+      vehicleTypeSlug,
+  );
+}
+
+export function getVehicleTypeAttributeGroup(
+  mode: Mode,
+  categorySlug: string,
+  subcategorySlug: string,
+  vehicleTypeSlug: string,
+): ProductAttributeGroup | null {
+  return getNextProductAttributeGroup(
+    getVehicleTypeProducts(mode, categorySlug, subcategorySlug, vehicleTypeSlug),
+    ["vehicle-type"],
+  );
+}
+
+function valuesForProductFacet(product: Product, facetSlug: string): string[] {
+  switch (facetSlug) {
+    case "vehicle-manufacturer":
+      return [product.technicalSpecs?.["Vehicle Manufacturer"] || ""];
+    case "compatible-vehicle-model":
+      return product.compatibleVehicles || [];
+    case "compatible-application":
+      return product.compatibleApplications || [];
+    case "position":
+      return [product.technicalSpecs?.Position || ""];
+    case "side":
+      return [product.technicalSpecs?.Side || ""];
+    case "fuel-type":
+      return [product.technicalSpecs?.["Fuel Type"] || ""];
+    case "voltage":
+      return [product.technicalSpecs?.Voltage || ""];
+    case "wattage":
+      return [product.technicalSpecs?.Wattage || ""];
+    case "base-socket":
+      return [product.technicalSpecs?.["Base Socket"] || ""];
+    case "diameter-mm":
+      return [product.technicalSpecs?.["Diameter Mm"] || ""];
+    case "brand":
+      return [product.brand || ""];
+    case "available-size":
+      return product.availableSizes || [];
+    default: {
+      if (!facetSlug.startsWith("spec-")) {
+        return [];
+      }
+      const specKeySlug = facetSlug.slice("spec-".length);
+      const matchingKey = Object.keys(product.technicalSpecs || {}).find(
+        (key) => slugify(key) === specKeySlug,
+      );
+      return matchingKey ? [product.technicalSpecs?.[matchingKey] || ""] : [];
+    }
+  }
+}
+
+function productFacetDefinitions(products: readonly Product[]) {
+  const definitions = PRODUCT_FACET_PRIORITY.map((field) => ({
+    field: field === "Compatible Vehicle Model" ? "Vehicle Model" : field,
+    slug: slugify(field),
+  }));
+  const specKeys = Array.from(
+    new Set(
+      products.flatMap((product) => Object.keys(product.technicalSpecs || {})),
+    ),
+  )
+    .filter((key) => !PRODUCT_SPEC_EXCLUSIONS.has(key.toLowerCase()))
+    .filter((key) => !PRODUCT_FACET_PRIORITY.includes(key))
+    .sort((a, b) => a.localeCompare(b));
+
+  return [
+    ...definitions,
+    ...specKeys.map((key) => ({ field: key, slug: `spec-${slugify(key)}` })),
+  ];
+}
+
+export function getNextProductAttributeGroup(
+  products: readonly Product[],
+  usedFacetSlugs: readonly string[] = [],
+): ProductAttributeGroup | null {
+  const used = new Set(usedFacetSlugs);
+
+  for (const facet of productFacetDefinitions(products)) {
+    if (used.has(facet.slug)) {
+      continue;
+    }
+
+    const grouped = new Map<string, { title: string; products: Product[] }>();
+    let missing: Product[] = [];
+
+    products.forEach((product) => {
+      const rawValues = valuesForProductFacet(product, facet.slug)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const values = rawValues.length > 0 ? rawValues : [];
+
+      if (values.length === 0) {
+        missing.push(product);
+        return;
+      }
+
+      values.forEach((value) => {
+        const valueSlug = slugify(value);
+        if (!valueSlug) {
+          missing.push(product);
+          return;
+        }
+        const bucket = grouped.get(valueSlug) || { title: value, products: [] };
+        if (!bucket.products.some((item) => item.id === product.id)) {
+          bucket.products.push(product);
+        }
+        grouped.set(valueSlug, bucket);
+      });
+    });
+
+    if (grouped.size < 2) {
+      continue;
+    }
+
+    if (missing.length > 0) {
+      grouped.set("not-specified", {
+        title: "Not specified",
+        products: missing,
+      });
+    }
+
+    return {
+      field: facet.field,
+      slug: facet.slug,
+      values: Array.from(grouped.entries())
+        .sort(([, a], [, b]) => a.title.localeCompare(b.title))
+        .map(([valueSlug, bucket]) => {
+          const firstProduct = bucket.products[0];
+          const count = bucket.products.length;
+          return {
+            id: `${facet.slug}-${valueSlug}`,
+            title: bucket.title,
+            slug: valueSlug,
+            description: `${count} ${count === 1 ? "product" : "products"} in ${facet.field.toLowerCase()}.`,
+            count: `${count} ${count === 1 ? "item" : "items"}`,
+            productCount: count,
+            imageUrl: firstProduct.image || firstProduct.imageUrl,
+          };
+        }),
+    };
+  }
+
+  return null;
+}
+
+export function filterProductsByAttributeValue(
+  products: readonly Product[],
+  facetSlug: string,
+  valueSlug: string,
+): Product[] {
+  return products.filter((product) => {
+    const values = valuesForProductFacet(product, facetSlug).filter(Boolean);
+    if (valueSlug === "not-specified" && values.length === 0) {
+      return true;
+    }
+    return values.some((value) => slugify(value) === valueSlug);
+  });
+}
+
+export function applyProductAttributeSelections(
+  initialProducts: readonly Product[],
+  selections: readonly ProductFacetSelection[],
+  initialUsedFacetSlugs: readonly string[] = [],
+): {
+  products: Product[];
+  usedFacetSlugs: string[];
+  trail: Array<{ facet: string; value: string }>;
+} | null {
+  let products = [...initialProducts];
+  const usedFacetSlugs = [...initialUsedFacetSlugs];
+  const trail: Array<{ facet: string; value: string }> = [];
+
+  for (const selection of selections) {
+    const nextGroup = getNextProductAttributeGroup(products, usedFacetSlugs);
+    if (!nextGroup || nextGroup.slug !== selection.facetSlug) {
+      return null;
+    }
+
+    const value = nextGroup.values.find((item) => item.slug === selection.valueSlug);
+    if (!value) {
+      return null;
+    }
+
+    trail.push({ facet: nextGroup.field, value: value.title });
+
+    products = filterProductsByAttributeValue(
+      products,
+      selection.facetSlug,
+      selection.valueSlug,
+    );
+    usedFacetSlugs.push(selection.facetSlug);
+  }
+
+  return { products, usedFacetSlugs, trail };
+}
+
+export function getVehicleAttributeProducts(
+  mode: Mode,
+  categorySlug: string,
+  subcategorySlug: string,
+  vehicleTypeSlug: string,
+  attributeSlug: string,
+  valueSlug: string,
+): Product[] {
+  const products = getVehicleTypeProducts(
+    mode,
+    categorySlug,
+    subcategorySlug,
+    vehicleTypeSlug,
+  );
+  const grouping = getNextProductAttributeGroup(products, ["vehicle-type"]);
+
+  if (!grouping || grouping.slug !== attributeSlug) {
+    return [];
+  }
+
+  const selectedValue = grouping.values.find((value) => value.slug === valueSlug);
+  if (!selectedValue) {
+    return [];
+  }
+
+  return filterProductsByAttributeValue(
+    products,
+    grouping.slug,
+    selectedValue.slug,
   );
 }
 
@@ -340,11 +662,62 @@ export function getStaticSubcategoryParams(): Array<
   StaticCategoryParam & { subcategorySlug: string }
 > {
   return getStaticCategoryParams().flatMap(({ mode, categorySlug }) =>
-    getCategorySubcategories(mode, categorySlug).map((subcategory) => ({
-      mode,
-      categorySlug,
-      subcategorySlug: subcategory.slug,
-    })),
+    getCategorySubcategories(mode, categorySlug)
+      .filter((subcategory) => subcategory.productCount > 1)
+      .map((subcategory) => ({
+        mode,
+        categorySlug,
+        subcategorySlug: subcategory.slug,
+      })),
+  );
+}
+
+export function getStaticVehicleTypeParams(): Array<
+  StaticCategoryParam & { subcategorySlug: string; vehicleTypeSlug: string }
+> {
+  return getStaticSubcategoryParams().flatMap(
+    ({ mode, categorySlug, subcategorySlug }) =>
+      getSubcategoryVehicleTypes(mode, categorySlug, subcategorySlug)
+        .filter((vehicleType) => vehicleType.productCount > 1)
+        .map((vehicleType) => ({
+          mode,
+          categorySlug,
+          subcategorySlug,
+          vehicleTypeSlug: vehicleType.slug,
+        })),
+  );
+}
+
+export function getStaticVehicleAttributeParams(): Array<
+  StaticCategoryParam & {
+    subcategorySlug: string;
+    vehicleTypeSlug: string;
+    attributeSlug: string;
+    valueSlug: string;
+  }
+> {
+  return getStaticVehicleTypeParams().flatMap(
+    ({ mode, categorySlug, subcategorySlug, vehicleTypeSlug }) => {
+      const grouping = getVehicleTypeAttributeGroup(
+        mode,
+        categorySlug,
+        subcategorySlug,
+        vehicleTypeSlug,
+      );
+
+      return grouping
+        ? grouping.values
+            .filter((value) => value.productCount > 1)
+            .map((value) => ({
+              mode,
+              categorySlug,
+              subcategorySlug,
+              vehicleTypeSlug,
+              attributeSlug: grouping.slug,
+              valueSlug: value.slug,
+            }))
+        : [];
+    },
   );
 }
 
